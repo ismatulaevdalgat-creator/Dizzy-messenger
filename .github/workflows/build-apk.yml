@@ -16,12 +16,19 @@ jobs:
 
       - name: Unzip Dizzy
         run: |
+          rm -rf dizzy
           unzip -o Dizzy-MVP.zip -d dizzy
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 20.19.1
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Install dependencies
         working-directory: dizzy
@@ -29,12 +36,58 @@ jobs:
 
       - name: Generate Android project
         working-directory: dizzy
-        run: npx expo prebuild --platform android --non-interactive
+        run: |
+          rm -rf android
+          npx expo prebuild --platform android --non-interactive
 
-      - name: Build APK
+      - name: Fix Expo Android autolinking
+        working-directory: dizzy
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path("android/settings.gradle")
+          text = p.read_text()
+
+          expo_line = """apply from: new File(
+            ["node", "--print", "require.resolve('expo/package.json')"]
+              .execute(null, rootDir).text.trim(),
+            "../scripts/autolinking.gradle"
+          )
+          useExpoModules()
+          """
+
+          if "useExpoModules()" not in text:
+              marker = "rootProject.name"
+              if marker in text:
+                  text = text.replace(marker, expo_line + "\n" + marker, 1)
+              else:
+                  text += "\n" + expo_line
+
+              p.write_text(text)
+
+          print("Expo autolinking configured.")
+          print(p.read_text())
+          PY
+
+      - name: Verify Expo autolinking
+        working-directory: dizzy
+        run: |
+          grep -n "useExpoModules" android/settings.gradle
+          grep -n "autolinking.gradle" android/settings.gradle
+
+      - name: Build release APK
         working-directory: dizzy/android
-        run: ./gradlew assembleRelease
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
 
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dizzy-APK
+          path: dizzy/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
