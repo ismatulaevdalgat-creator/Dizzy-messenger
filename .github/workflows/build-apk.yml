@@ -17,7 +17,7 @@ jobs:
       - name: Unzip Dizzy
         run: |
           rm -rf dizzy
-          unzip -o Dizzy-MVP.zip -d dizzy
+          unzip -o Dizzy-Android-Fixed.zip -d dizzy
 
       - name: Setup Node
         uses: actions/setup-node@v4
