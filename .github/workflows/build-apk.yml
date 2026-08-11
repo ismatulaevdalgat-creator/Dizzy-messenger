@@ -14,23 +14,36 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare project
+      - name: Prepare Dizzy project
         run: |
           rm -rf dizzy
           mkdir dizzy
-          unzip -o Dizzy-Android-Fixed.zip -d dizzy
-          find dizzy -maxdepth 3 -type f | sort
+          unzip -o Dizzy-Android-Fixed-Corrected.zip -d dizzy
+          echo "Project files:"
+          find dizzy -maxdepth 2 -type f | sort
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20.19.1
+          node-version: 20
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Check package.json
+        working-directory: dizzy
+        run: |
+          echo "Expo:"
+          node -p "require('./package.json').dependencies.expo"
+          echo "React:"
+          node -p "require('./package.json').dependencies.react"
+          echo "React Native:"
+          node -p "require('./package.json').dependencies['react-native']"
+          echo "Vector Icons:"
+          node -p "require('./package.json').dependencies['@expo/vector-icons']"
 
       - name: Install dependencies
         working-directory: dizzy
@@ -40,7 +53,12 @@ jobs:
       - name: Install Expo dependencies
         working-directory: dizzy
         run: |
-          npx expo install expo-font expo-constants expo-linking react-native-screens --legacy-peer-deps
+          npx expo install expo-font expo-constants expo-linking react-native-screens
+
+      - name: Check Expo dependencies
+        working-directory: dizzy
+        run: |
+          npx expo-doctor
 
       - name: Generate Android project
         working-directory: dizzy
@@ -56,7 +74,7 @@ jobs:
 
       - name: Verify APK
         run: |
-          echo "Checking APK..."
+          echo "Searching for APK..."
           find dizzy/android/app/build/outputs/apk/release -type f -name "*.apk" -print
           test -f dizzy/android/app/build/outputs/apk/release/app-release.apk
 
