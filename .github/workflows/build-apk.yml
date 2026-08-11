@@ -36,6 +36,7 @@ jobs:
           rm -rf node_modules package-lock.json
           npm install
           npx expo install --fix --npm
+          npx expo install expo-font expo-constants expo-linking react-native-screens
 
       - name: Check Expo dependencies
         working-directory: dizzy
