@@ -27,27 +27,16 @@ jobs:
         working-directory: dizzy
         run: npm install
 
-      - name: Install EAS CLI
-        run: npm install -g eas-cli
-
-      - name: Create EAS config
+      - name: Generate Android project
         working-directory: dizzy
-        run: |
-          cat > eas.json <<'EOF'
-          {
-            "build": {
-              "preview": {
-                "distribution": "internal",
-                "android": {
-                  "buildType": "apk"
-                }
-              }
-            }
-          }
-          EOF
+        run: npx expo prebuild --platform android --non-interactive
 
-      - name: Build Android APK
-        working-directory: dizzy
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: eas build --platform android --profile preview --non-interactive
+      - name: Build APK
+        working-directory: dizzy/android
+        run: ./gradlew assembleRelease
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dizzy-APK
+          path: dizzy/android/app/build/outputs/apk/release/app-release.apk
