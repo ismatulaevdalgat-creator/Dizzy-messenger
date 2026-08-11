@@ -74,7 +74,6 @@ jobs:
         working-directory: dizzy
         run: |
           grep -n "useExpoModules" android/settings.gradle
-          grep -n "autolinking.gradle" android/settings.gradle
 
       - name: Build release APK
         working-directory: dizzy/android
