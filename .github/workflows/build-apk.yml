@@ -1,0 +1,50 @@
+name: Build Dizzy APK
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unzip Dizzy
+        run: |
+          unzip -o Dizzy-MVP.zip -d dizzy
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: dizzy
+        run: npm install
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Create EAS config
+        working-directory: dizzy
+        run: |
+          cat > eas.json <<'EOF'
+          {
+            "build": {
+              "preview": {
+                "distribution": "internal",
+                "android": {
+                  "buildType": "apk"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Build Android APK
+        working-directory: dizzy
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: eas build --platform android --profile preview --non-interactive
