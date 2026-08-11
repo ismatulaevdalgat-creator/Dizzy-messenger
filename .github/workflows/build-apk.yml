@@ -32,48 +32,21 @@ jobs:
 
       - name: Install dependencies
         working-directory: dizzy
-        run: npm install
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
+          npx expo install --fix --npm
+
+      - name: Check Expo dependencies
+        working-directory: dizzy
+        run: |
+          npx expo-doctor
 
       - name: Generate Android project
         working-directory: dizzy
         run: |
           rm -rf android
-          npx expo prebuild --platform android --non-interactive
-
-      - name: Fix Expo Android autolinking
-        working-directory: dizzy
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          p = Path("android/settings.gradle")
-          text = p.read_text()
-
-          expo_line = """apply from: new File(
-            ["node", "--print", "require.resolve('expo/package.json')"]
-              .execute(null, rootDir).text.trim(),
-            "../scripts/autolinking.gradle"
-          )
-          useExpoModules()
-          """
-
-          if "useExpoModules()" not in text:
-              marker = "rootProject.name"
-              if marker in text:
-                  text = text.replace(marker, expo_line + "\n" + marker, 1)
-              else:
-                  text += "\n" + expo_line
-
-              p.write_text(text)
-
-          print("Expo autolinking configured.")
-          print(p.read_text())
-          PY
-
-      - name: Verify Expo autolinking
-        working-directory: dizzy
-        run: |
-          grep -n "useExpoModules" android/settings.gradle
+          npx expo prebuild --clean --platform android --non-interactive
 
       - name: Build release APK
         working-directory: dizzy/android
@@ -85,10 +58,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Dizzy-APK
-          path: dizzy/android/app/build/outputs/apk/release/app-release.apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dizzy-APK
-          path: dizzy/android/app/build/outputs/apk/release/app-release.apk
