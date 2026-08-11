@@ -11,23 +11,35 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Extract project ZIP
+        run: |
+          unzip -o "Dizzy-final-ready.zip" -d .
+          echo "Project extracted:"
+          ls -la
+          test -f package.json
+          test -f package-lock.json
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20.19.1
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
       - name: Install dependencies
-        run: npm install --legacy-peer-deps
+        run: npm ci
+
+      - name: Install Expo peer dependencies
+        run: npx expo install expo-font
 
       - name: Check Expo dependencies
         run: npx expo-doctor
@@ -35,6 +47,23 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --clean --platform android --non-interactive
 
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK
+        run: |
+          test -f android/app/build/outputs/apk/release/app-release.apk
+          ls -lh android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dizzy-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
       - name: Build release APK
         working-directory: android
         run: |
