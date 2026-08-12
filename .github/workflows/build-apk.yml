@@ -1,138 +1,143 @@
-from pathlib import Path
-workflow = r"""name: Build Dizzy APK
-on: workflow_dispatch: push: branches: - main
-jobs: build: runs-on: ubuntu-latest
-steps:
-  - name: Checkout repository
-    uses: actions/checkout@v4
+name: Build Dizzy APK
 
-  - name: Setup Node
-    uses: actions/setup-node@v4
-    with:
-      node-version: 20.19.1
-      cache: ''
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
 
-  - name: Setup Java
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: '17'
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
 
-  - name: Extract Dizzy project ZIP
-    shell: bash
-    run: |
-      set -e
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      ZIP_FILE="Dizzy-final-ready.zip"
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: ""
 
-      if [ ! -f "$ZIP_FILE" ]; then
-        echo "ERROR: $ZIP_FILE not found in repository root."
-        echo "Files in repository:"
-        ls -la
-        exit 1
-      fi
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
-      rm -rf project
-      mkdir -p project
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      unzip -q "$ZIP_FILE" -d project
+      - name: Install unzip
+        run: sudo apt-get update && sudo apt-get install -y unzip
 
-      echo "Extracted project:"
-      find project -maxdepth 3 -type f | sort
+      - name: Find project ZIP
+        id: find_zip
+        shell: bash
+        run: |
+          set -e
 
-  - name: Find project root
-    shell: bash
-    run: |
-      set -e
+          ZIP="Dizzy-final-ready.zip"
 
-      PROJECT_ROOT="$(find "$GITHUB_WORKSPACE/project" -type f -name package.json -print -quit)"
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: $ZIP not found"
+            echo "Files in repository:"
+            find . -maxdepth 2 -type f -print
+            exit 1
+          fi
 
-      if [ -z "$PROJECT_ROOT" ]; then
-        echo "ERROR: package.json was not found inside Dizzy-final-ready.zip"
-        exit 1
-      fi
+          echo "ZIP found: $ZIP"
+          echo "zip_path=$ZIP" >> "$GITHUB_OUTPUT"
 
-      PROJECT_ROOT="$(dirname "$PROJECT_ROOT")"
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -e
 
-      echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
-      echo "Project root: $PROJECT_ROOT"
+          rm -rf project
+          mkdir project
 
-  - name: Verify project files
-    working-directory: ${{ env.PROJECT_ROOT }}
-    shell: bash
-    run: |
-      set -e
+          unzip -q "${{ steps.find_zip.outputs.zip_path }}" -d project
 
-      test -f package.json
-      test -f app.json
-      test -f babel.config.js
+          echo "Extracted files:"
+          find project -maxdepth 3 -type f -print | head -200
 
-      echo "Project files:"
-      ls -la
+      - name: Locate Expo project
+        id: locate_project
+        shell: bash
+        run: |
+          set -e
 
-  - name: Fix Expo SDK 54 dependencies
-    working-directory: ${{ env.PROJECT_ROOT }}
-    shell: bash
-    run: |
-      set -e
+          PROJECT_DIR=$(find project -type f -name package.json \
+            -not -path "*/node_modules/*" \
+            -print -quit | xargs -r dirname)
 
-      node <<'NODE'
-      const fs = require('fs');
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERROR: package.json was not found inside ZIP"
+            find project -maxdepth 5 -type f -print
+            exit 1
+          fi
 
-      const file = 'package.json';
-      const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
+          echo "Expo project found at: $PROJECT_DIR"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      pkg.dependencies = pkg.dependencies || {};
+      - name: Check package.json
+        working-directory: ${{ steps.locate_project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
 
-      pkg.dependencies["expo"] = "~54.0.27";
-      pkg.dependencies["react"] = "19.1.0";
-      pkg.dependencies["react-native"] = "0.81.5";
-      pkg.dependencies["@expo/vector-icons"] = "^15.0.3";
-      pkg.dependencies["expo-font"] = "~14.0.12";
+          echo "package.json:"
+          cat package.json
 
-      fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
-      NODE
+          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('package.json is valid JSON')"
 
-      echo "Final package.json:"
-      cat package.json
+      - name: Install dependencies
+        working-directory: ${{ steps.locate_project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
 
-  - name: Install npm dependencies
-    working-directory: ${{ env.PROJECT_ROOT }}
-    shell: bash
-    run: |
-      set -e
+          rm -f package-lock.json npm-shrinkwrap.json yarn.lock
 
-      rm -rf node_modules
-      rm -f package-lock.json npm-shrinkwrap.json yarn.lock
+          npm install --legacy-peer-deps --no-audit --no-fund
 
-      npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Install Expo peer dependencies
+        working-directory: ${{ steps.locate_project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
 
-  - name: Align Expo dependencies
-    working-directory: ${{ env.PROJECT_ROOT }}
-    shell: bash
-    run: |
-      set -e
+          npx expo install expo-font @expo/vector-icons
 
-      npx expo install --fix --npm
+      - name: Check Expo dependencies
+        working-directory: ${{ steps.locate_project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
 
-  - name: Verify installed dependencies
-    working-directory: ${{ env.PROJECT_ROOT }}
-    shell: bash
-    run: |
-      set -e
+          npx expo install --check
 
-      echo "Node:"
-      node --version
+      - name: Generate Android project
+        working-directory: ${{ steps.locate_project.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -e
 
-      echo "npm:"
-      npm --version
+          npx expo prebuild \
+            --platform android \
+            --non-interactive \
+            --clean
 
-      echo "Expo:"
-      npx expo --version
+      - name: Build release APK
+        working-directory: ${{ steps.locate_project.outputs.project_dir }}/android
+        shell: bash
+        run: |
+          set -e
 
-      echo "Important packages:"
-      npm list expo react react-native @expo/vector-icons expo-font expo-router --depth=0 || true
-
+          chmod +x gradlew
   - name: Check Expo project
     working-directory: ${{ env.PROJECT_ROOT }}
     shell: bash
