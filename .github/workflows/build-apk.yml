@@ -3,8 +3,7 @@ name: Build Dizzy APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
@@ -15,26 +14,74 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Extract project ZIP
+        shell: bash
         run: |
-          unzip -o "Dizzy-final-ready.zip" -d .
-          echo "Project extracted:"
-          ls -la
+          set -euo pipefail
+
+          ZIP="$(find . -maxdepth 1 -type f -name 'Dizzy-final-ready.zip' -print -quit)"
+          if [ -z "$ZIP" ]; then
+            echo "Dizzy-final-ready.zip not found in repository root."
+            exit 1
+          fi
+
+          rm -rf .project-extracted
+          mkdir .project-extracted
+          unzip -q "$ZIP" -d .project-extracted
+
+          if [ -f .project-extracted/package.json ]; then
+            SRC=".project-extracted"
+          else
+            SRC="$(find .project-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)"
+            if [ -z "$SRC" ] || [ ! -f "$SRC/package.json" ]; then
+              echo "package.json was not found inside Dizzy-final-ready.zip"
+              exit 1
+            fi
+          fi
+
+          cp -a "$SRC"/. .
+          rm -rf .project-extracted
+
           test -f package.json
-          test -f package-lock.json
+          echo "Project extracted successfully."
+          ls -la
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20.19.1
-          cache: npm
-          cache-dependency-path: package-lock.json
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Check Expo dependencies
+        run: npx expo-doctor
+
+      - name: Generate Android project
+        run: npx expo prebuild --clean --platform android --non-interactive
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Verify APK
+        run: |
+          test -f android/app/build/outputs/apk/release/app-release.apk
+          ls -lh android/app/build/outputs/apk/release/app-release.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dizzy-APK
+          path: android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
       - name: Install dependencies
         run: npm ci
 
