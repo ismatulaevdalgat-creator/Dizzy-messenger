@@ -1,130 +1,167 @@
-name: Build Dizzy APK
+from pathlib import Path
+workflow = r"""name: Build Dizzy APK
+on: workflow_dispatch: push: branches: - main
+jobs: build: runs-on: ubuntu-latest
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [main]
+  - name: Setup Node
+    uses: actions/setup-node@v4
+    with:
+      node-version: 20.19.1
+      cache: ''
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+  - name: Setup Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+  - name: Extract Dizzy project ZIP
+    shell: bash
+    run: |
+      set -e
 
-      - name: Extract project ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
+      ZIP_FILE="Dizzy-final-ready.zip"
 
-          ZIP="$(find . -maxdepth 1 -type f -name 'Dizzy-final-ready.zip' -print -quit)"
-          if [ -z "$ZIP" ]; then
-            echo "Dizzy-final-ready.zip not found in repository root."
-            exit 1
-          fi
+      if [ ! -f "$ZIP_FILE" ]; then
+        echo "ERROR: $ZIP_FILE not found in repository root."
+        echo "Files in repository:"
+        ls -la
+        exit 1
+      fi
 
-          rm -rf .project-extracted
-          mkdir .project-extracted
-          unzip -q "$ZIP" -d .project-extracted
+      rm -rf project
+      mkdir -p project
 
-          if [ -f .project-extracted/package.json ]; then
-            SRC=".project-extracted"
-          else
-            SRC="$(find .project-extracted -mindepth 1 -maxdepth 1 -type d -print -quit)"
-            if [ -z "$SRC" ] || [ ! -f "$SRC/package.json" ]; then
-              echo "package.json was not found inside Dizzy-final-ready.zip"
-              exit 1
-            fi
-          fi
+      unzip -q "$ZIP_FILE" -d project
 
-          cp -a "$SRC"/. .
-          rm -rf .project-extracted
+      echo "Extracted project:"
+      find project -maxdepth 3 -type f | sort
 
-          test -f package.json
-          echo "Project extracted successfully."
-          ls -la
+  - name: Find project root
+    shell: bash
+    run: |
+      set -e
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.19.1
+      PROJECT_ROOT="$(find "$GITHUB_WORKSPACE/project" -type f -name package.json -print -quit)"
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+      if [ -z "$PROJECT_ROOT" ]; then
+        echo "ERROR: package.json was not found inside Dizzy-final-ready.zip"
+        exit 1
+      fi
 
-      - name: Install dependencies
-        run: npm install --legacy-peer-deps --no-audit --no-fund
+      PROJECT_ROOT="$(dirname "$PROJECT_ROOT")"
 
-      - name: Check Expo dependencies
-        run: npx expo-doctor
+      echo "PROJECT_ROOT=$PROJECT_ROOT" >> "$GITHUB_ENV"
+      echo "Project root: $PROJECT_ROOT"
 
-      - name: Generate Android project
-        run: npx expo prebuild --clean --platform android --non-interactive
+  - name: Verify project files
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
 
-      - name: Build release APK
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+      test -f package.json
+      test -f app.json
+      test -f babel.config.js
 
-      - name: Verify APK
-        run: |
-          test -f android/app/build/outputs/apk/release/app-release.apk
-          ls -lh android/app/build/outputs/apk/release/app-release.apk
+      echo "Project files:"
+      ls -la
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dizzy-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-      - name: Install dependencies
-        run: npm ci
+  - name: Fix Expo SDK 54 dependencies
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
 
-      - name: Install Expo peer dependencies
-        run: npx expo install expo-font
+      node <<'NODE'
+      const fs = require('fs');
 
-      - name: Check Expo dependencies
-        run: npx expo-doctor
+      const file = 'package.json';
+      const pkg = JSON.parse(fs.readFileSync(file, 'utf8'));
 
-      - name: Generate Android project
-        run: npx expo prebuild --clean --platform android --non-interactive
+      pkg.dependencies = pkg.dependencies || {};
 
-      - name: Build release APK
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+      pkg.dependencies["expo"] = "~54.0.27";
+      pkg.dependencies["react"] = "19.1.0";
+      pkg.dependencies["react-native"] = "0.81.5";
+      pkg.dependencies["@expo/vector-icons"] = "^15.0.3";
+      pkg.dependencies["expo-font"] = "~14.0.12";
 
-      - name: Verify APK
-        run: |
-          test -f android/app/build/outputs/apk/release/app-release.apk
-          ls -lh android/app/build/outputs/apk/release/app-release.apk
+      fs.writeFileSync(file, JSON.stringify(pkg, null, 2) + '\n');
+      NODE
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dizzy-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
-      - name: Build release APK
-        working-directory: android
-        run: |
-          chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+      echo "Final package.json:"
+      cat package.json
 
-      - name: Verify APK
-        run: |
-          test -f android/app/build/outputs/apk/release/app-release.apk
-          ls -lh android/app/build/outputs/apk/release/app-release.apk
+  - name: Install npm dependencies
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
 
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dizzy-APK
-          path: android/app/build/outputs/apk/release/app-release.apk
-          if-no-files-found: error
+      rm -rf node_modules
+      rm -f package-lock.json npm-shrinkwrap.json yarn.lock
+
+      npm install --legacy-peer-deps --no-audit --no-fund
+
+  - name: Align Expo dependencies
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
+
+      npx expo install --fix --npm
+
+  - name: Verify installed dependencies
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
+
+      echo "Node:"
+      node --version
+
+      echo "npm:"
+      npm --version
+
+      echo "Expo:"
+      npx expo --version
+
+      echo "Important packages:"
+      npm list expo react react-native @expo/vector-icons expo-font expo-router --depth=0 || true
+
+  - name: Check Expo project
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
+
+      npx expo-doctor
+
+  - name: Generate Android project
+    working-directory: ${{ env.PROJECT_ROOT }}
+    shell: bash
+    run: |
+      set -e
+
+      rm -rf android
+
+      npx expo prebuild \
+        --platform android \
+        --clean \
+        --non-interactive
+
+  - name: Build release APK
+    working-directory: ${{ env.PROJECT_ROOT }}/android
+    shell: bash
+    run: |
+      set -e
+
+      chmod +x gradlew
+
+      ./gradlew assembleRelease \
+        --no-daemon \
+        --stacktrace
