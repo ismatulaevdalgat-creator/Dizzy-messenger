@@ -1,0 +1,114 @@
+name: Build Dizzy Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dizzy-final-ready.zip'
+      - '.github/workflows/build-apk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Extract project ZIP
+        shell: bash
+        run: |
+          set -e
+          rm -rf project
+          mkdir -p project
+          test -f Dizzy-final-ready.zip
+          unzip -q Dizzy-final-ready.zip -d project
+          echo "Extracted:"
+          find project -maxdepth 3 -type f | sort | head -200
+
+      - name: Locate Expo project
+        shell: bash
+        run: |
+          set -e
+          PROJECT_DIR="$(find "$GITHUB_WORKSPACE/project" -maxdepth 4 -name package.json -type f -print -quit)"
+          test -n "$PROJECT_DIR"
+          PROJECT_DIR="$(dirname "$PROJECT_DIR")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          test -f "$PROJECT_DIR/package.json"
+          test -f "$PROJECT_DIR/app.json" || test -f "$PROJECT_DIR/app.config.js" || test -f "$PROJECT_DIR/app.config.ts"
+
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+            npm ci
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Install Expo peer dependency
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          npx expo install expo-font
+
+      - name: Check Expo dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          npx expo-doctor
+
+      - name: Generate Android project
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          npx expo prebuild --platform android --non-interactive --clean
+
+      - name: Build release APK
+        working-directory: ${{ env.PROJECT_DIR }}/android
+        shell: bash
+        run: |
+          set -e
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Verify APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+          APK="$(find android/app/build/outputs/apk/release -type f -name '*.apk' -print -quit)"
+          test -n "$APK"
+          ls -lh "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dizzy-release-apk
+          path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
